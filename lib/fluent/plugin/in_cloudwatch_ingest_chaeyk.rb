@@ -42,7 +42,7 @@ module Fluent::Plugin
     config_section :parse do
       config_set_default :@type, 'cloudwatch_ingest_chaeyk'
       desc 'Regular expression with which to parse the event message'
-      config_param :expression, :string, default: '^(?<message>.+)$'
+      config_param :expression, :regexp, default: /^(?<message>.+)$/
       desc 'Take the timestamp from the event rather than the expression'
       config_param :event_time, :bool, default: true
       desc 'Time format to use when parsing event message'
