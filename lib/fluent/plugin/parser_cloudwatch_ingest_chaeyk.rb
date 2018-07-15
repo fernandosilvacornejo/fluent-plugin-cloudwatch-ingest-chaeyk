@@ -1,6 +1,6 @@
 require 'fluent/plugin/parser_regexp'
 require 'fluent/time'
-require 'multi_json'
+require 'json'
 
 module Fluent
   module Plugin
@@ -37,11 +37,10 @@ module Fluent
             # Whilst we could just merge! the parsed
             # message into the record we'd bork on
             # nested keys. Force level one Strings.
-            json_body = MultiJson.load(record['message'])
-            json_body.each_pair do |k, v|
-              record[k.to_s] = v.to_s
-            end
-          rescue MultiJson::ParseError
+            json_body = JSON.parse(record['message'])
+            record.merge! json_body
+            record.delete 'message'
+          rescue
             if @fail_on_unparsable_json
               yield nil, nil
               return

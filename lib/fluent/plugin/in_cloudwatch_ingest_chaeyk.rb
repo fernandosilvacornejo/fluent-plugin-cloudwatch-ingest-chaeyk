@@ -36,7 +36,7 @@ module Fluent::Plugin
     desc 'Limit the number of events fetched in any iteration'
     config_param :limit_events, :integer, default: 10_000
     desc 'Do not fetch events before this time'
-    config_param :event_start_time, :integer, default: 0
+    config_param :max_event_age_minutes, :integer, default: 0
     desc 'Fetch the oldest logs first'
     config_param :oldest_logs_first, :bool, default: false
     config_section :parse do
@@ -248,10 +248,11 @@ module Fluent::Plugin
             # If we have then use the stored forward_token to pick up
             # from that point. Otherwise start from the start.
 
+            event_start_time = Time.now.to_i - @max_event_age_minutes * 60
             begin
               event_count += process_stream(group, stream,
                                             state.store[group][stream]['token'],
-                                            @event_start_time, state)
+                                            event_start_time, state)
             rescue Aws::CloudWatchLogs::Errors::InvalidParameterException
               log.error('cloudwatch token is expired or broken. '\
                         'trying with timestamp.')
@@ -259,7 +260,7 @@ module Fluent::Plugin
               # try again with timestamp instead of forward token
               begin
                 timestamp = state.store[group][stream]['timestamp']
-                timestamp = @event_start_time unless timestamp
+                timestamp = event_start_time unless timestamp
 
                 event_count += process_stream(group, stream,
                                               nil, timestamp, state)
