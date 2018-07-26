@@ -141,6 +141,7 @@ module Fluent::Plugin
         rescue => boom
           sleep @api_interval
           if (retries += 1) <= @api_max_retries
+            log.info("Retry #{retries}: Unable to retrieve log groups: #{boom.inspect}")
             next_token = nil
             retry
           else
@@ -179,6 +180,7 @@ module Fluent::Plugin
         rescue => boom
           sleep @api_interval
           if (retries += 1) <= @api_max_retries
+            log.info("Retry #{retries}: Unable to retrieve log streams for group #{log_group_name} with stream prefix #{log_stream_name_prefix}: #{boom.inspect}") # rubocop:disable all
             log_streams = []
             next_token = nil
             retry
@@ -231,6 +233,7 @@ module Fluent::Plugin
             state.store[group][stream]['timestamp']
         end
       end
+      log.info("Finished processing stream #{stream} for log group #{group}")
 
       return event_count
     end
@@ -280,6 +283,8 @@ module Fluent::Plugin
               rescue => boom
                 sleep @api_interval
                 if (retries += 1) <= @api_max_retries
+                  log.info("Retry: #{retries}: Unable to retrieve events for stream #{stream} "\
+                            "in group #{group}: #{boom.inspect}") # rubocop:disable all
                   retry
                 else
                   log.error("Unable to retrieve events for stream #{stream} "\
@@ -290,6 +295,8 @@ module Fluent::Plugin
             rescue => boom
               sleep @api_interval
               if (retries += 1) <= @api_max_retries
+                log.info("Retry: #{retries} Unable to retrieve events for stream #{stream} "\
+                          "in group #{group}: #{boom.inspect}") # rubocop:disable all
                 retry
               else
                 log.error("Unable to retrieve events for stream #{stream} "\
