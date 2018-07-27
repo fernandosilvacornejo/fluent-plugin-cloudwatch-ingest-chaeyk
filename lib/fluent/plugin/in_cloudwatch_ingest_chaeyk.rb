@@ -29,6 +29,8 @@ module Fluent::Plugin
     config_param :interval, :time, default: 60
     desc 'Time to pause between API call failures and limits'
     config_param :api_interval, :time, default: 5
+    desc 'Max retries after api failure'
+    config_param :api_max_retries, :integer, default: 5
     desc 'Tag to apply to record'
     config_param :tag, :string, default: 'cloudwatch'
     desc 'Enabled AWS SDK logging'
@@ -120,6 +122,7 @@ module Fluent::Plugin
       # Fetch all log group names
       next_token = nil
       loop do
+        retries = 0
         begin
           response = if !log_group_prefix.empty?
                        @aws.describe_log_groups(
@@ -136,10 +139,15 @@ module Fluent::Plugin
           break unless response.next_token
           next_token = response.next_token
         rescue => boom
-          log.error("Unable to retrieve log groups: #{boom.inspect}")
-          next_token = nil
           sleep @api_interval
-          retry
+          if (retries += 1) <= @api_max_retries
+            log.info("Retry #{retries}: Unable to retrieve log groups: #{boom.inspect}")
+            next_token = nil
+            retry
+          else
+            log.error("Unable to retrieve log groups: #{boom.inspect}")
+            break
+          end
         end
       end
       log.info("Found #{log_groups.size} log groups")
@@ -151,6 +159,7 @@ module Fluent::Plugin
       log_streams = []
       next_token = nil
       loop do
+        retries = 0
         begin
           response = if !log_stream_name_prefix.empty?
                        @aws.describe_log_streams(
@@ -169,11 +178,16 @@ module Fluent::Plugin
           break unless response.next_token
           next_token = response.next_token
         rescue => boom
-          log.error("Unable to retrieve log streams for group #{log_group_name} with stream prefix #{log_stream_name_prefix}: #{boom.inspect}") # rubocop:disable all
-          log_streams = []
-          next_token = nil
           sleep @api_interval
-          retry
+          if (retries += 1) <= @api_max_retries
+            log.info("Retry #{retries}: Unable to retrieve log streams for group #{log_group_name} with stream prefix #{log_stream_name_prefix}: #{boom.inspect}") # rubocop:disable all
+            log_streams = []
+            next_token = nil
+            retry
+          else
+            log.error("Unable to retrieve log streams for group #{log_group_name} with stream prefix #{log_stream_name_prefix}: #{boom.inspect}") # rubocop:disable all
+            break
+          end
         end
       end
       log.info("Found #{log_streams.size} streams for #{log_group_name}")
@@ -219,6 +233,7 @@ module Fluent::Plugin
             state.store[group][stream]['timestamp']
         end
       end
+      log.info("Finished processing stream #{stream} for log group #{group}")
 
       return event_count
     end
@@ -249,6 +264,7 @@ module Fluent::Plugin
             # from that point. Otherwise start from the start.
 
             event_start_time = Time.now.to_i - @max_event_age_minutes * 60
+            retries = 0
             begin
               event_count += process_stream(group, stream,
                                             state.store[group][stream]['token'],
@@ -265,16 +281,28 @@ module Fluent::Plugin
                 event_count += process_stream(group, stream,
                                               nil, timestamp, state)
               rescue => boom
-                log.error("Unable to retrieve events for stream #{stream} "\
-                          "in group #{group}: #{boom.inspect}") # rubocop:disable all
                 sleep @api_interval
-                next
+                if (retries += 1) <= @api_max_retries
+                  log.info("Retry: #{retries}: Unable to retrieve events for stream #{stream} "\
+                            "in group #{group}: #{boom.inspect}") # rubocop:disable all
+                  retry
+                else
+                  log.error("Unable to retrieve events for stream #{stream} "\
+                            "in group #{group}: #{boom.inspect}") # rubocop:disable all
+                  next
+                end
               end
             rescue => boom
-              log.error("Unable to retrieve events for stream #{stream} "\
-                        "in group #{group}: #{boom.inspect}") # rubocop:disable all
               sleep @api_interval
-              next
+              if (retries += 1) <= @api_max_retries
+                log.info("Retry: #{retries} Unable to retrieve events for stream #{stream} "\
+                          "in group #{group}: #{boom.inspect}") # rubocop:disable all
+                retry
+              else
+                log.error("Unable to retrieve events for stream #{stream} "\
+                          "in group #{group}: #{boom.inspect}") # rubocop:disable all
+                next
+              end
             end
           end
         end
