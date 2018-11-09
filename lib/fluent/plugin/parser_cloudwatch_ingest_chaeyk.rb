@@ -37,10 +37,12 @@ module Fluent
             # Whilst we could just merge! the parsed
             # message into the record we'd bork on
             # nested keys. Force level one Strings.
+            log.debug("Parsing message as JSON: #{record['message']}")
             json_body = JSON.parse(record['message'])
-            record.merge! json_body
             record.delete 'message'
+            record.merge! json_body
           rescue
+            log.debug("Error parsing JSON: #{$!}")
             if @fail_on_unparsable_json
               yield nil, nil
               return
