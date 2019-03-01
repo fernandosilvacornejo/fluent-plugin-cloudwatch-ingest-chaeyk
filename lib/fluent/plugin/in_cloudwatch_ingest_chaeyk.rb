@@ -40,7 +40,7 @@ module Fluent::Plugin
     desc 'Do not fetch events before this time'
     config_param :max_event_age_minutes, :integer, default: 0
     desc 'Fetch the oldest logs first'
-    config_param :oldest_logs_first, :bool, default: false
+    config_param :oldest_logs_first, :bool, default: true
     config_section :parse do
       config_set_default :@type, 'cloudwatch_ingest_chaeyk'
       desc 'Regular expression with which to parse the event message'
@@ -100,6 +100,7 @@ module Fluent::Plugin
       end
       @aws = Aws::CloudWatchLogs::Client.new(aws_options)
       @finished = false
+      @event_start_time = Time.now.to_i - @max_event_age_minutes * 60
       @thread = Thread.new(&method(:run))
     end
 
@@ -243,7 +244,7 @@ module Fluent::Plugin
         begin
           state = State.new(@state_file_name, log)
         rescue => boom
-          log.info("Failed lock state. Sleeping for #{@api_interval}: "\
+          log.warn("Failed when trying to setup state file. Sleeping for #{@api_interval}: "\
                    "#{boom.inspect}")
           sleep @api_interval
           next
@@ -262,13 +263,11 @@ module Fluent::Plugin
             # See if we have some stored state for this group and stream.
             # If we have then use the stored forward_token to pick up
             # from that point. Otherwise start from the start.
-
-            event_start_time = Time.now.to_i - @max_event_age_minutes * 60
             retries = 0
             begin
               event_count += process_stream(group, stream,
                                             state.store[group][stream]['token'],
-                                            event_start_time, state)
+                                            @event_start_time, state)
             rescue Aws::CloudWatchLogs::Errors::InvalidParameterException
               log.error('cloudwatch token is expired or broken. '\
                         'trying with timestamp.')
@@ -276,7 +275,7 @@ module Fluent::Plugin
               # try again with timestamp instead of forward token
               begin
                 timestamp = state.store[group][stream]['timestamp']
-                timestamp = event_start_time unless timestamp
+                timestamp = @event_start_time unless timestamp
 
                 event_count += process_stream(group, stream,
                                               nil, timestamp, state)
@@ -318,7 +317,7 @@ module Fluent::Plugin
         if event_count > 0
           sleep_interval = @interval
         else
-          sleep_interval = @api_interval # when there is no events, slow down
+          sleep_interval = @api_interval # when there are no events, slow down
         end
 
         log.info("#{event_count} events processed.")
@@ -349,12 +348,6 @@ module Fluent::Plugin
                        "#{boom.inspect}")
           end
         end
-
-        # Attempt to obtain an exclusive flock on the file and raise and
-        # exception if we can't
-        @log.info("Obtaining exclusive lock on state file #{statefile.path}")
-        lockstatus = statefile.flock(File::LOCK_EX | File::LOCK_NB)
-        raise CloudwatchIngestInput::State::LockFailed if lockstatus == false
 
         begin
           @store.merge!(Psych.safe_load(statefile.read))
