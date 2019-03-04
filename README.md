@@ -61,13 +61,7 @@ attempt to `sts:AssumeRole` the `sts_arn`. This is useful for fetching logs from
 Both the `log_group_name_prefix` and `log_stream_name_prefix` may be omitted, in which case all groups and streams will be ingested. For performance reasons it is often desirable to set the `log_stream_name_prefix` to be today's date, managed by a configuration management system.
 
 ### State file
-The state file is a YAML serialization of the current ingestion state. When running in a HA configuration this should be placed on a shared filesystem, such as EFS.
-The state file is opened with an exclusive write call and as such also functions as a lock file in HA configurations. See below.
-
-### HA Setup
-When the state file is located on a shared filesystem an exclusive write lock will attempted each `interval`.
-As such it is safe to run multiple instances of this plugin consuming from the same CloudWatch logging source without fear of duplication, as long as they share a state file.
-In a properly configured auto-scaling group this provides for uninterrupted log ingestion in the event of a failure of any single node.
+The state file is a YAML serialization of the current ingestion state. No HA is supported in this fork.
 
 ### Sub-second timestamps
 When using `event_time true` the `@timestamp` field for the record is taken from the time recorded against the event by Cloudwatch. This is the most common mode to run in as it's an easy path to normalization: all of your Lambdas or other AWS service need not have the same, valid, `time_format` nor a regex that matches every case.
